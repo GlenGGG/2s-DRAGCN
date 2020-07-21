@@ -23,9 +23,6 @@ from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
-
 class GradualWarmupScheduler(_LRScheduler):
     def __init__(self, optimizer, total_epoch, after_scheduler=None):
         self.total_epoch = total_epoch
@@ -190,7 +187,7 @@ def get_parser():
 
 
 class Processor():
-    """ 
+    """
         Processor for Skeleton-based Action Recgnition
     """
 

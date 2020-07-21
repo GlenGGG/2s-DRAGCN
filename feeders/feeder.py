@@ -9,16 +9,17 @@ from feeders import tools
 
 
 class Feeder(Dataset):
-    def __init__(self, data_path, label_path,
-                 random_choose=False, random_shift=False, random_move=False,
-                 window_size=-1, normalization=False, debug=False, use_mmap=True):
+    def __init__(self, data_path, label_path, random_choose=False,
+                 random_shift=False, random_move=False, window_size=-1,
+                 normalization=False, debug=False, duo_only=False,
+                 use_mmap=True):
         """
-        
-        :param data_path: 
-        :param label_path: 
+
+        :param data_path:
+        :param label_path:
         :param random_choose: If true, randomly choose a portion of the input sequence
         :param random_shift: If true, randomly pad zeros at the begining or end of sequence
-        :param random_move: 
+        :param random_move:
         :param window_size: The length of the output sequence
         :param normalization: If true, normalize input sequence
         :param debug: If true, only use the first 100 samples
@@ -26,6 +27,7 @@ class Feeder(Dataset):
         """
 
         self.debug = debug
+        self.duo_only=duo_only
         self.data_path = data_path
         self.label_path = label_path
         self.random_choose = random_choose
@@ -44,28 +46,25 @@ class Feeder(Dataset):
         try:
             with open(self.label_path) as f:
                 self.sample_name, self.label = pickle.load(f)
-        except:
+        except BaseException:
             # for pickle file from python2
             with open(self.label_path, 'rb') as f:
-                self.sample_name, self.label = pickle.load(f, encoding='latin1')
+                self.sample_name, self.label = pickle.load(
+                    f, encoding='latin1')
 
         # load data
         if self.use_mmap:
             self.data = np.load(self.data_path, mmap_mode='r')
         else:
             self.data = np.load(self.data_path)
-        if self.debug:
+        if self.duo_only:
             idx = []
-            print("label type: {}".format(type(self.label)))
-            print("data type: {}".format(type(self.data)))
-            print("sample_name type: {}".format(type(self.sample_name)))
-            print("data shape: {}".format(self.data.shape))
             new_label = []
             new_sample_name = []
             for (i, l) in enumerate(self.label):
                 # duo
-                if (l >= 49 and l<=59) or (l>=105 and l<=119):
-                    if l>=49 and l<=59:
+                if (l >= 49 and l <= 59) or (l >= 105 and l <= 119):
+                    if l >= 49 and l <= 59:
                         l = l-49
                     else:
                         l = l-105 + 11
@@ -74,16 +73,23 @@ class Feeder(Dataset):
                     new_sample_name.append(self.sample_name[i])
             N, C, T, V, M = self.data.shape
             self.data = self.data[idx]
-            print("after data shape: {}".format(self.data.shape))
-
             self.label = new_label
             self.sample_name = new_sample_name
+
+        if self.debug:
+            self.label = self.label[0:100]
+            self.data = self.data[0:100]
+            self.sample_name = self.sample_name[0:100]
 
     def get_mean_map(self):
         data = self.data
         N, C, T, V, M = data.shape
-        self.mean_map = data.mean(axis=2, keepdims=True).mean(axis=4, keepdims=True).mean(axis=0)
-        self.std_map = data.transpose((0, 2, 4, 1, 3)).reshape((N * T * M, C * V)).std(axis=0).reshape((C, 1, V, 1))
+        self.mean_map = data.mean(
+            axis=2, keepdims=True).mean(
+            axis=4, keepdims=True).mean(
+            axis=0)
+        self.std_map = data.transpose((0, 2, 4, 1, 3)).reshape(
+            (N * T * M, C * V)).std(axis=0).reshape((C, 1, V, 1))
 
     def __len__(self):
         return len(self.label)
@@ -126,12 +132,12 @@ def import_class(name):
 def test(data_path, label_path, vid=None, graph=None, is_3d=False):
     '''
     vis the samples using matplotlib
-    :param data_path: 
-    :param label_path: 
+    :param data_path:
+    :param label_path:
     :param vid: the id of sample
-    :param graph: 
+    :param graph:
     :param is_3d: when vis NTU, set it True
-    :return: 
+    :return:
     '''
     import matplotlib.pyplot as plt
     loader = torch.utils.data.DataLoader(
@@ -159,10 +165,19 @@ def test(data_path, label_path, vid=None, graph=None, is_3d=False):
             ax = fig.add_subplot(111)
 
         if graph is None:
-            p_type = ['b.', 'g.', 'r.', 'c.', 'm.', 'y.', 'k.', 'k.', 'k.', 'k.']
-            pose = [
-                ax.plot(np.zeros(V), np.zeros(V), p_type[m])[0] for m in range(M)
-            ]
+            p_type = [
+                'b.',
+                'g.',
+                'r.',
+                'c.',
+                'm.',
+                'y.',
+                'k.',
+                'k.',
+                'k.',
+                'k.']
+            pose = [ax.plot(np.zeros(V), np.zeros(V), p_type[m])[0]
+                    for m in range(M)]
             ax.axis([-1, 1, -1, 1])
             for t in range(T):
                 for m in range(M):
@@ -171,11 +186,24 @@ def test(data_path, label_path, vid=None, graph=None, is_3d=False):
                 fig.canvas.draw()
                 plt.pause(0.001)
         else:
-            p_type = ['b-', 'g-', 'r-', 'c-', 'm-', 'y-', 'k-', 'k-', 'k-', 'k-']
+            p_type = [
+                'b-',
+                'g-',
+                'r-',
+                'c-',
+                'm-',
+                'y-',
+                'k-',
+                'k-',
+                'k-',
+                'k-']
             import sys
             from os import path
             sys.path.append(
-                path.dirname(path.dirname(path.dirname(path.abspath(__file__)))))
+                path.dirname(
+                    path.dirname(
+                        path.dirname(
+                            path.abspath(__file__)))))
             G = import_class(graph)()
             edge = G.inward
             pose = []
@@ -183,9 +211,17 @@ def test(data_path, label_path, vid=None, graph=None, is_3d=False):
                 a = []
                 for i in range(len(edge)):
                     if is_3d:
-                        a.append(ax.plot(np.zeros(3), np.zeros(3), p_type[m])[0])
+                        a.append(
+                            ax.plot(
+                                np.zeros(3),
+                                np.zeros(3),
+                                p_type[m])[0])
                     else:
-                        a.append(ax.plot(np.zeros(2), np.zeros(2), p_type[m])[0])
+                        a.append(
+                            ax.plot(
+                                np.zeros(2),
+                                np.zeros(2),
+                                p_type[m])[0])
                 pose.append(a)
             ax.axis([-1, 1, -1, 1])
             if is_3d:
@@ -195,11 +231,13 @@ def test(data_path, label_path, vid=None, graph=None, is_3d=False):
                     for i, (v1, v2) in enumerate(edge):
                         x1 = data[0, :2, t, v1, m]
                         x2 = data[0, :2, t, v2, m]
-                        if (x1.sum() != 0 and x2.sum() != 0) or v1 == 1 or v2 == 1:
+                        if (x1.sum() != 0 and x2.sum()
+                                != 0) or v1 == 1 or v2 == 1:
                             pose[m][i].set_xdata(data[0, 0, t, [v1, v2], m])
                             pose[m][i].set_ydata(data[0, 1, t, [v1, v2], m])
                             if is_3d:
-                                pose[m][i].set_3d_properties(data[0, 2, t, [v1, v2], m])
+                                pose[m][i].set_3d_properties(
+                                    data[0, 2, t, [v1, v2], m])
                 fig.canvas.draw()
                 # plt.savefig('/home/lshi/Desktop/skeleton_sequence/' + str(t) + '.jpg')
                 plt.pause(0.01)
@@ -212,7 +250,12 @@ if __name__ == '__main__':
     data_path = "../data/ntu/xview/val_data_joint.npy"
     label_path = "../data/ntu/xview/val_label.pkl"
     graph = 'graph.ntu_rgb_d.Graph'
-    test(data_path, label_path, vid='S004C001P003R001A032', graph=graph, is_3d=True)
+    test(
+        data_path,
+        label_path,
+        vid='S004C001P003R001A032',
+        graph=graph,
+        is_3d=True)
     # data_path = "../data/kinetics/val_data.npy"
     # label_path = "../data/kinetics/val_label.pkl"
     # graph = 'graph.Kinetics'

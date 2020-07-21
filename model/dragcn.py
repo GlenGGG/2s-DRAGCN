@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from .my_Aadp_gen import MyAadpGen,tanh_sigmoid,normalize_Aadp
+from .ram_gen_process import RAMGen, scaledTanh, normalizeRAM
 
 
 def import_class(name):
@@ -38,44 +38,56 @@ class unit_tcn(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=9, stride=1):
         super(unit_tcn, self).__init__()
         pad = int((kernel_size - 1) / 2)
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(kernel_size, 1), padding=(pad, 0),
-                              stride=(stride, 1))
-        self.Aadp_conv = nn.Conv2d(1,1, kernel_size=(kernel_size, 1), padding=(pad, 0),
-                              stride=(stride, 1))
+        self.conv = nn.Conv2d(
+            in_channels, out_channels, kernel_size=(
+                kernel_size, 1), padding=(
+                pad, 0), stride=(
+                stride, 1))
+        self.RAM_conv = nn.Conv2d(
+            1, 1, kernel_size=(
+                kernel_size, 1), padding=(
+                pad, 0), stride=(
+                stride, 1))
 
         self.bn = nn.BatchNorm2d(out_channels)
-        self.Aadp_bn = nn.BatchNorm2d(1)
+        self.RAM_bn = nn.BatchNorm2d(1)
         self.relu = nn.ReLU()
         conv_init(self.conv)
-        conv_init(self.Aadp_conv)
+        conv_init(self.RAM_conv)
         bn_init(self.bn, 1)
-        bn_init(self.Aadp_bn, 1)
+        bn_init(self.RAM_bn, 1)
 
-    def forward(self, x, Aadp):
+    def forward(self, x, RAM):
         x = self.bn(self.conv(x))
-        N,T,V,W=Aadp.shape
-        Aadp=Aadp.contiguous().view(N,1,T,V*W)
-        Aadp=self.Aadp_bn(self.Aadp_conv(Aadp))
-        Aadp=torch.squeeze(Aadp,1)
-        N,T,VW=Aadp.shape
-        Aadp=Aadp.contiguous().view(N,T,V,W)
-        Aadp=normalize_Aadp(tanh_sigmoid(Aadp))
-        return x, Aadp
+        N, T, V, W = RAM.shape
+        RAM = RAM.contiguous().view(N, 1, T, V*W)
+        RAM = self.RAM_bn(self.RAM_conv(RAM))
+        RAM = torch.squeeze(RAM, 1)
+        N, T, VW = RAM.shape
+        RAM = RAM.contiguous().view(N, T, V, W)
+        RAM = normalizeRAM(scaledTanh(RAM))
+        return x, RAM
 
+# Plut drgc into agc
 class unit_drgcn(nn.Module):
-    def __init__(self, in_channels, out_channels, A, coff_embedding=4, num_subset=3):
+    def __init__(self, in_channels, out_channels,
+                 A, coff_embedding=4, num_subset=3):
         super(unit_drgcn, self).__init__()
         inter_channels = out_channels // coff_embedding
         self.inter_c = inter_channels
         self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)))
         nn.init.constant_(self.PA, 1e-6)
-        self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
+        self.A = Variable(
+            torch.from_numpy(
+                A.astype(
+                    np.float32)),
+            requires_grad=False)
         self.num_subset = num_subset
 
         self.conv_a = nn.ModuleList()
         self.conv_b = nn.ModuleList()
         self.conv_d = nn.ModuleList()
-        self.conv_r = nn.Conv2d(in_channels,out_channels,1)
+        self.conv_r = nn.Conv2d(in_channels, out_channels, 1)
         for i in range(self.num_subset):
             self.conv_a.append(nn.Conv2d(in_channels, inter_channels, 1))
             self.conv_b.append(nn.Conv2d(in_channels, inter_channels, 1))
@@ -102,7 +114,7 @@ class unit_drgcn(nn.Module):
         for i in range(self.num_subset):
             conv_branch_init(self.conv_d[i], self.num_subset)
 
-    def forward(self, x, Aadp):
+    def forward(self, x, RAM):
         N, C, T, V = x.size()
         A = self.A.cuda(x.get_device())
         A = A + self.PA
@@ -110,91 +122,39 @@ class unit_drgcn(nn.Module):
 
         y = None
         for i in range(self.num_subset):
-            A1 = self.conv_a[i](x).permute(0, 3, 1, 2).contiguous().view(N, V, self.inter_c * T)
+            A1 = self.conv_a[i](x).permute(
+                0, 3, 1, 2).contiguous().view(
+                N, V, self.inter_c * T)
             A2 = self.conv_b[i](x).view(N, self.inter_c * T, V)
             A1 = self.soft(torch.matmul(A1, A2) / A1.size(-1))  # N V V
             A1 = A1 + A[i]
             A2 = x.view(N, C * T, V)
             z = self.conv_d[i](torch.matmul(A2, A1).view(N, C, T, V))
             y = z + y if y is not None else z
-        x=x.contiguous().view(N//2, 2,C,T,V)
-        x_a,x_b=x.chunk(2,1)
-        x_a=torch.squeeze(x_a)
-        x_b=torch.squeeze(x_b)
-        N,C,T,V=y.shape
-        y=y.contiguous().view(N//2,2,C,T,V)
-        y_a,y_b=y.chunk(2,1)
-        y_a=torch.squeeze(y_a)
-        y_b=torch.squeeze(y_b)
-        x_a=self.conv_r(x_a)
-        x_b=self.conv_r(x_b)
-        x_a_r=torch.einsum('nctw,ntvw->nctv',(x_b,Aadp))
-        x_b_r=torch.einsum('nctv,ntvw->nctw',(x_a,Aadp))
-        y_a=y_a+x_a_r
-        y_b=y_b+x_b_r
-        y=torch.stack((y_a,y_b),1)
-        y = y.contiguous().view(N,C,T,V)
+
+        # split two people
+        x = x.contiguous().view(N//2, 2, C, T, V)
+        x_a, x_b = x.chunk(2, 1)
+        x_a = torch.squeeze(x_a)
+        x_b = torch.squeeze(x_b)
+        N, C, T, V = y.shape
+        y = y.contiguous().view(N//2, 2, C, T, V)
+        y_a, y_b = y.chunk(2, 1)
+        y_a = torch.squeeze(y_a)
+        y_b = torch.squeeze(y_b)
+        # drgc
+        x_a = self.conv_r(x_a)
+        x_b = self.conv_r(x_b)
+        x_a_r = torch.einsum('nctw,ntvw->nctv', (x_b, RAM))
+        x_b_r = torch.einsum('nctv,ntvw->nctw', (x_a, RAM))
+        # integrate
+        y_a = y_a+x_a_r
+        y_b = y_b+x_b_r
+        y = torch.stack((y_a, y_b), 1)
+        y = y.contiguous().view(N, C, T, V)
 
         y = self.bn(y)
         y += res_x
-        return self.relu(y)
-
-class unit_gcn(nn.Module):
-    def __init__(self, in_channels, out_channels, A, coff_embedding=4, num_subset=3):
-        super(unit_gcn, self).__init__()
-        inter_channels = out_channels // coff_embedding
-        self.inter_c = inter_channels
-        self.PA = nn.Parameter(torch.from_numpy(A.astype(np.float32)))
-        nn.init.constant_(self.PA, 1e-6)
-        self.A = Variable(torch.from_numpy(A.astype(np.float32)), requires_grad=False)
-        self.num_subset = num_subset
-
-        self.conv_a = nn.ModuleList()
-        self.conv_b = nn.ModuleList()
-        self.conv_d = nn.ModuleList()
-        for i in range(self.num_subset):
-            self.conv_a.append(nn.Conv2d(in_channels, inter_channels, 1))
-            self.conv_b.append(nn.Conv2d(in_channels, inter_channels, 1))
-            self.conv_d.append(nn.Conv2d(in_channels, out_channels, 1))
-
-        if in_channels != out_channels:
-            self.down = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 1),
-                nn.BatchNorm2d(out_channels)
-            )
-        else:
-            self.down = lambda x: x
-
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.soft = nn.Softmax(-2)
-        self.relu = nn.ReLU()
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                conv_init(m)
-            elif isinstance(m, nn.BatchNorm2d):
-                bn_init(m, 1)
-        bn_init(self.bn, 1e-6)
-        for i in range(self.num_subset):
-            conv_branch_init(self.conv_d[i], self.num_subset)
-
-    def forward(self, x):
-        N, C, T, V = x.size()
-        A = self.A.cuda(x.get_device())
-        A = A + self.PA
-
-        y = None
-        for i in range(self.num_subset):
-            A1 = self.conv_a[i](x).permute(0, 3, 1, 2).contiguous().view(N, V, self.inter_c * T)
-            A2 = self.conv_b[i](x).view(N, self.inter_c * T, V)
-            A1 = self.soft(torch.matmul(A1, A2) / A1.size(-1))  # N V V
-            A1 = A1 + A[i]
-            A2 = x.view(N, C * T, V)
-            z = self.conv_d[i](torch.matmul(A2, A1).view(N, C, T, V))
-            y = z + y if y is not None else z
-
-        y = self.bn(y)
-        y += self.down(x)
         return self.relu(y)
 
 
@@ -205,24 +165,30 @@ class TCN_GCN_unit(nn.Module):
         self.tcn1 = unit_tcn(out_channels, out_channels, stride=stride)
         self.relu = nn.ReLU()
         if not residual:
-            self.residual = lambda x,y: (0,0)
+            self.residual = lambda x, y: (0, 0)
 
         elif (in_channels == out_channels) and (stride == 1):
-            self.residual = lambda x,y: (x,y)
+            self.residual = lambda x, y: (x, y)
 
         else:
-            self.residual = unit_tcn(in_channels, out_channels, kernel_size=1, stride=stride)
+            self.residual = unit_tcn(
+                in_channels,
+                out_channels,
+                kernel_size=1,
+                stride=stride)
 
-    def forward(self, x, Aadp):
-        res_x,res_Aadp = self.residual(x, Aadp)
-        x, Aadp = self.tcn1(self.gcn1(x,Aadp), Aadp)
-        x=x+res_x
-        Aadp=Aadp+res_Aadp
-        return self.relu(x), Aadp
+    def forward(self, x, RAM):
+        # plugged TCN for RAM
+        res_x, res_RAM = self.residual(x, RAM)
+        x, RAM = self.tcn1(self.gcn1(x, RAM), RAM)
+        x = x+res_x
+        RAM = RAM+res_RAM
+        return self.relu(x), RAM
 
 
 class Model(nn.Module):
-    def __init__(self, num_class=60, num_point=25, num_person=2, graph=None, graph_args=dict(), in_channels=3):
+    def __init__(self, num_class=60, num_point=25, num_person=2,
+                 graph=None, graph_args=dict(), in_channels=3):
         super(Model, self).__init__()
 
         if graph is None:
@@ -248,27 +214,31 @@ class Model(nn.Module):
         self.fc = nn.Linear(256, num_class)
         nn.init.normal_(self.fc.weight, 0, math.sqrt(2. / num_class))
         bn_init(self.data_bn, 1)
-        self.myAadpGen=MyAadpGen(3,128,64,(9,A.shape[0],A.shape[1]),A,True,True)
+        self.RAMGen = RAMGen(
+            3, 128, 64, (9, A.shape[0], A.shape[1]), A, 300, True, True)
 
     def forward(self, x):
         N, C, T, V, M = x.size()
 
         x = x.permute(0, 4, 3, 1, 2).contiguous().view(N, M * V * C, T)
         x = self.data_bn(x)
-        x = x.view(N, M, V, C, T).permute(0, 1, 3, 4, 2).contiguous().view(N, M, C, T, V)
-        Aadp = self.myAadpGen(x)
-        x=x.contiguous().view(N*M,C,T,V)
+        x = x.view(
+            N, M, V, C, T).permute(
+            0, 1, 3, 4, 2).contiguous().view(
+            N, M, C, T, V)
+        RAM = self.RAMGen(x)
+        x = x.contiguous().view(N*M, C, T, V)
 
-        x, Aadp = self.l1(x, Aadp)
-        x, Aadp = self.l2(x, Aadp)
-        x, Aadp = self.l3(x, Aadp)
-        x, Aadp = self.l4(x, Aadp)
-        x, Aadp = self.l5(x, Aadp)
-        x, Aadp = self.l6(x, Aadp)
-        x, Aadp = self.l7(x, Aadp)
-        x, Aadp = self.l8(x, Aadp)
-        x, Aadp = self.l9(x, Aadp)
-        x, Aadp = self.l10(x, Aadp)
+        x, RAM = self.l1(x, RAM)
+        x, RAM = self.l2(x, RAM)
+        x, RAM = self.l3(x, RAM)
+        x, RAM = self.l4(x, RAM)
+        x, RAM = self.l5(x, RAM)
+        x, RAM = self.l6(x, RAM)
+        x, RAM = self.l7(x, RAM)
+        x, RAM = self.l8(x, RAM)
+        x, RAM = self.l9(x, RAM)
+        x, RAM = self.l10(x, RAM)
 
         # N*M,C,T,V
         c_new = x.size(1)

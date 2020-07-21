@@ -3,7 +3,8 @@ feeder: feeders.feeder.Feeder
 test_feeder_args:
   data_path: ./data/ntu/xview/val_data_bone.npy
   label_path: ./data/ntu/xview/val_label.pkl
-  debug: True
+  duo_only: True
+  debug: False
 
 # model
 model: model.agcn.Model
