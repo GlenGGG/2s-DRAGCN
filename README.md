@@ -3,9 +3,9 @@ Two Stream Dyadic Relational AGCN (2s-DRAGCN) for skeleton based interaction rec
 
 We integrate our methods in [Dyadic Relational Graph Convolutional Network (DR-GCN)](https://github.com/GlenGGG/DR-GCN) with [Two-Stream Adaptive Graph Convolutional Networks (2s-AGCN) for Skeleton-Based Action Recognition in CVPR19](https://github.com/lshiwjx/2s-AGCN).
 
-We make minimal adaptions to their 2s-AGCN to plug our methods in their code.
+We made minimal adaptions to their 2s-AGCN to plug our methods in their code.
 
-We add dragcn.py and ram_gen_process.py to [model folder](/model). We also adjusted [feeder/feeder.py](/feeder/feeder.py) to include only interaction classes in NTU-RGB+D (120). Additionally, we changed class numbers in config files accordingly.
+We added dragcn.py and ram_gen_process.py to [model folder](/model). We also adjusted [feeder/feeder.py](/feeder/feeder.py) to include only interaction classes in NTU-RGB+D (120). Additionally, we changed class numbers in config files accordingly.
 
 # Data Preparation
 
