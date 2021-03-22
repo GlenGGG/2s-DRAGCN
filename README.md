@@ -1,7 +1,7 @@
 # 2s-DRAGCN
 Two Stream Dyadic Relational AGCN (2s-DRAGCN) for skeleton based interaction recognition. 
 
-We integrate our methods in [Dyadic Relational Graph Convolutional Network (DR-GCN)](https://github.com/GlenGGG/DR-GCN) with [Two-Stream Adaptive Graph Convolutional Networks (2s-AGCN) for Skeleton-Based Action Recognition in CVPR19](https://github.com/lshiwjx/2s-AGCN).
+We integrate our methods in [Dyadic Relational Graph Convolutional Network (DR-GCN)](https://github.com/GlenGGG/DR-GCN) (here is the [paper link](https://www.sciencedirect.com/science/article/pii/S0031320321001072)) with [Two-Stream Adaptive Graph Convolutional Networks (2s-AGCN) for Skeleton-Based Action Recognition in CVPR19](https://github.com/lshiwjx/2s-AGCN).
 
 We made minimal adaptions to their 2s-AGCN to plug our methods in their code.
 
